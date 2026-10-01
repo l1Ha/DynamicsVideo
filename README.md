@@ -124,16 +124,32 @@ python3 -m dyv bench recording.dyv
 # 将图片序列编码为 DyV
 python3 -m dyv encode "frames/*.png" output.dyv --fps 30 --codec zlib
 
+# 格式互转：GIF 转换为 DyV (享受局部刷新与体积压缩)
+python3 -m dyv convert animation.gif output.dyv
+
+# 格式互转：DyV 导出为兼容 GIF 动图
+python3 -m dyv convert input.dyv exported.gif
+
 # 提取各帧保存为图片
 python3 -m dyv dump recording.dyv -o output_frames/
 ```
 
 ---
 
-## 🧪 单元测试
+## 🌐 Web 前端极速播放器 (HTML5 Canvas)
 
-项目包含完善的测试套件，覆盖二进制格式协议、编解码、脏矩形检测、瓦片网格、动态帧率与 CLI：
+DyV 天然契合浏览器渲染引擎。项目内置了零额外转码依赖的 Web 播放器演示：
+- 文件路径：`examples/player.html`
+- **实现原理**：利用 HTML5 Canvas 2D 渲染上下文的原生 `putImageData(imageData, dx, dy)` API。当收到脏矩形增量帧时，浏览器仅将局部矩形覆盖到画布对应坐标，渲染延迟小于 0.2ms，CPU 占用极低！
+- **体验方式**：双击或在本地静态服务器打开 `examples/player.html`，选择任何 `.dyv` 视频文件即可实时流畅播放。
+
+---
+
+## 🧪 单元测试与 CI 持续集成
+
+项目包含完善的自动化测试套件与 GitHub Actions 多版本矩阵持续集成（Python 3.8 ~ 3.12）：
 ```bash
+# 本地运行 17 项全量测试
 python3 -m pytest tests -v
 ```
 

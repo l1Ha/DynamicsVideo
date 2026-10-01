@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dyv"
+version = "1.0.0"
+authors = [
+  { name="l1Ha", email="161421951+l1Ha@users.noreply.github.com" },
+]
+description = "DyV (Dynamic Video) - Variable Frame Rate & Partial Area Refresh Video Format"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: GNU Affero General Public License v3 (AGPLv3)",
+    "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+image = ["Pillow>=8.0.0"]
+zstd = ["zstandard>=0.18.0"]
+all = ["Pillow>=8.0.0", "zstandard>=0.18.0"]
+dev = ["pytest>=7.0.0"]
+
+[project.scripts]
+dyv = "dyv.cli:main"
+
+[project.urls]
+"Homepage" = "https://github.com/l1Ha/DynamicsVideo"
+"Bug Tracker" = "https://github.com/l1Ha/DynamicsVideo/issues"
+"Specification" = "https://github.com/l1Ha/DynamicsVideo/blob/main/docs/SPEC.md"

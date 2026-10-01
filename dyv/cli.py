@@ -236,6 +236,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="关键帧间隔 (默认 60 帧)",
     )
 
+    # convert
+    p_conv = subparsers.add_parser("convert", help="将 GIF 与 DyV 进行相互转换")
+    p_conv.add_argument("input", help="输入文件路径 (.gif 或 .dyv)")
+    p_conv.add_argument("output", help="输出文件路径 (.dyv 或 .gif)")
+
     args = parser.parse_args(argv)
     if args.command == "info":
         return cmd_info(args)
@@ -245,6 +250,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_dump(args)
     elif args.command == "encode":
         return cmd_encode(args)
+    elif args.command == "convert":
+        from .converter import gif_to_dyv, dyv_to_gif
+        in_path = args.input
+        out_path = args.output
+        if in_path.lower().endswith(".gif") and out_path.lower().endswith(".dyv"):
+            n = gif_to_dyv(in_path, out_path)
+            print(f"成功将 GIF ({n} 帧) 转换为 DyV: {out_path}")
+            return 0
+        elif in_path.lower().endswith(".dyv") and out_path.lower().endswith(".gif"):
+            n = dyv_to_gif(in_path, out_path)
+            print(f"成功将 DyV ({n} 帧) 转换为 GIF: {out_path}")
+            return 0
+        else:
+            print("错误: 目前支持 .gif <=> .dyv 互转", file=sys.stderr)
+            return 1
     return 0
 
 

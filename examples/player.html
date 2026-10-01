@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>DyV Web Player (HTML5 Canvas 原生局部刷新播放器)</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 30px;
+      margin: 0;
+    }
+    h1 {
+      margin-bottom: 6px;
+      color: #38bdf8;
+      font-size: 26px;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 24px;
+      font-size: 14px;
+      text-align: center;
+      max-width: 650px;
+    }
+    .player-card {
+      background: #1e293b;
+      padding: 24px;
+      border-radius: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 900px;
+      width: 100%;
+    }
+    .canvas-wrapper {
+      position: relative;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+    canvas {
+      display: block;
+      max-width: 100%;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-top: 18px;
+      align-items: center;
+      width: 100%;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button, label.btn-upload {
+      background: #0284c7;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:hover:not(:disabled), label.btn-upload:hover {
+      background: #0369a1;
+      transform: translateY(-1px);
+    }
+    button:disabled {
+      background: #475569;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .stats {
+      margin-top: 20px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      color: #34d399;
+      background: #090d16;
+      padding: 14px 20px;
+      border-radius: 8px;
+      width: 95%;
+      box-sizing: border-box;
+      line-height: 1.7;
+      border: 1px solid #1e3a5f;
+    }
+  </style>
+  <!-- 引入 pako 库以支持浏览器端原生解压 zlib -->
+  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+</head>
+<body>
+
+  <h1>DyV HTML5 局部刷新播放器</h1>
+  <div class="subtitle">
+    原生利用 Canvas <code>putImageData</code> 进行亚毫秒级局部脏矩形覆盖。当画面中仅局部变动时，浏览器仅将变化区域写入画布，CPU 占用极低！
+  </div>
+
+  <div class="player-card">
+    <div class="canvas-wrapper">
+      <canvas id="videoCanvas" width="640" height="480"></canvas>
+    </div>
+    
+    <div class="controls">
+      <label class="btn-upload">
+        选择 .dyv 视频
+        <input type="file" id="fileInput" accept=".dyv">
+      </label>
+      <button id="btnPlay" disabled>播放</button>
+      <button id="btnPause" disabled>暂停</button>
+      <button id="btnReset" disabled>重新播放</button>
+    </div>
+
+    <div class="stats" id="statsBox">
+      等待加载 .dyv 文件... 您可以从 examples/ 目录选择测试生成的视频。
+    </div>
+  </div>
+
+  <script>
+    class DyvWebDecoder {
+      constructor(arrayBuffer) {
+        this.bytes = new Uint8Array(arrayBuffer);
+        this.view = new DataView(arrayBuffer);
+        this.offset = 0;
+        this.frames = [];
+        this.parseHeader();
+        this.parseAllFrames();
+      }
+
+      readVarint() {
+        let result = 0, shift = 0;
+        while (true) {
+          if (this.offset >= this.bytes.length) throw new Error("Varint 越界");
+          let b = this.bytes[this.offset++];
+          result |= (b & 0x7F) << shift;
+          if (!(b & 0x80)) return result;
+          shift += 7;
+        }
+      }
+
+      parseHeader() {
+        const magic = String.fromCharCode(...this.bytes.slice(0, 4));
+        if (magic !== "DYV ") throw new Error("非有效 DyV 文件 (魔数不符)");
+        this.version = this.bytes[4];
+        this.profile = this.bytes[5];
+        this.flags = this.view.getUint16(6, true);
+        this.width = this.view.getUint32(8, true);
+        this.height = this.view.getUint32(12, true);
+        this.tileSize = this.view.getUint16(16, true);
+        this.timescale = this.view.getUint32(18, true);
+        this.pixelFormat = this.bytes[22];
+        this.tileCodec = this.bytes[23];
+        this.transform = this.bytes[24];
+        this.offset = 26;
+
+        this.cols = Math.floor((this.width + this.tileSize - 1) / this.tileSize);
+        this.rows = Math.floor((this.height + this.tileSize - 1) / this.tileSize);
+        this.totalTiles = this.cols * this.rows;
+
+        // 跳过 Header 元数据盒
+        while (this.offset < this.bytes.length) {
+          let boxType = this.bytes[this.offset++];
+          if (boxType === 0) break;
+          let len = this.readVarint();
+          this.offset += len;
+        }
+      }
+
+      parseAllFrames() {
+        while (this.offset < this.bytes.length) {
+          let ftype = this.bytes[this.offset++];
+          if (ftype === 0xFF) break; // 帧流终止
+
+          let pts = this.readVarint();
+
+          if (ftype === 3) {
+            // EMPTY 空帧
+            this.frames.push({ type: 'empty', pts, timeSec: pts / this.timescale });
+            continue;
+          }
+
+          if (ftype === 0) {
+            // KEY 关键帧
+            let payloads = [];
+            for (let i = 0; i < this.totalTiles; i++) {
+              let len = this.readVarint();
+              payloads.push(this.bytes.subarray(this.offset, this.offset + len));
+              this.offset += len;
+            }
+            this.frames.push({ type: 'key', pts, timeSec: pts / this.timescale, payloads });
+          } else if (ftype === 1) {
+            // DELTA_TILES 瓦片局部刷新
+            let count = this.readVarint();
+            let indices = [];
+            let prev = null;
+            for (let i = 0; i < count; i++) {
+              let gap = this.readVarint();
+              let idx = (prev === null) ? gap : (prev + gap + 1);
+              indices.push(idx);
+              prev = idx;
+            }
+            let payloads = [];
+            for (let i = 0; i < count; i++) {
+              let len = this.readVarint();
+              payloads.push(this.bytes.subarray(this.offset, this.offset + len));
+              this.offset += len;
+            }
+            this.frames.push({ type: 'tile', pts, timeSec: pts / this.timescale, indices, payloads });
+          } else if (ftype === 2) {
+            // DELTA_RECTS 脏矩形局部刷新
+            let count = this.readVarint();
+            let rects = [];
+            for (let i = 0; i < count; i++) {
+              let rx = this.readVarint();
+              let ry = this.readVarint();
+              let rw = this.readVarint();
+              let rh = this.readVarint();
+              let rlen = this.readVarint();
+              let rdata = this.bytes.subarray(this.offset, this.offset + rlen);
+              this.offset += rlen;
+              rects.push({ x: rx, y: ry, w: rw, h: rh, data: rdata });
+            }
+            this.frames.push({ type: 'rect', pts, timeSec: pts / this.timescale, rects });
+          }
+        }
+      }
+    }
+
+    // 播放器状态机
+    const canvas = document.getElementById("videoCanvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const statsBox = document.getElementById("statsBox");
+    const fileInput = document.getElementById("fileInput");
+    const btnPlay = document.getElementById("btnPlay");
+    const btnPause = document.getElementById("btnPause");
+    const btnReset = document.getElementById("btnReset");
+
+    let decoder = null;
+    let currentFrameIdx = 0;
+    let isPlaying = false;
+    let timerId = null;
+
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        const buf = await file.arrayBuffer();
+        decoder = new DyvWebDecoder(buf);
+        canvas.width = decoder.width;
+        canvas.height = decoder.height;
+
+        btnPlay.disabled = false;
+        btnReset.disabled = false;
+        btnPause.disabled = true;
+
+        currentFrameIdx = 0;
+        renderFrame(0);
+
+        statsBox.innerHTML = `✅ 已加载文件: <b>${file.name}</b><br>` +
+          `尺寸: ${decoder.width} x ${decoder.height} | 总帧数: ${decoder.frames.length} | 时间基: ${decoder.timescale} ticks/s<br>` +
+          `总时长: ${decoder.frames[decoder.frames.length - 1].timeSec.toFixed(2)} 秒 (动态帧率 VFR)`;
+      } catch (err) {
+        alert("解析 DyV 失败: " + err.message);
+      }
+    });
+
+    function decompressTile(data, w, h) {
+      if (typeof pako === 'undefined') {
+        throw new Error("请确保联网以加载 pako zlib 解压库");
+      }
+      return pako.inflate(data);
+    }
+
+    function renderFrame(idx) {
+      if (!decoder || idx >= decoder.frames.length) return;
+      const f = decoder.frames[idx];
+      let updateInfo = "";
+
+      if (f.type === 'key') {
+        // 全量关键帧渲染
+        for (let i = 0; i < decoder.totalTiles; i++) {
+          const row = Math.floor(i / decoder.cols);
+          const col = i % decoder.cols;
+          const x0 = col * decoder.tileSize;
+          const y0 = row * decoder.tileSize;
+          const w = Math.min(decoder.tileSize, decoder.width - x0);
+          const h = Math.min(decoder.tileSize, decoder.height - y0);
+
+          const rawRgb = decompressTile(f.payloads[i], w, h);
+          const imgData = ctx.createImageData(w, h);
+          for (let p = 0; p < w * h; p++) {
+            imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
+            imgData.data[p * 4 + 1] = rawRgb[p * 3 + 1];
+            imgData.data[p * 4 + 2] = rawRgb[p * 3 + 2];
+            imgData.data[p * 4 + 3] = 255;
+          }
+          ctx.putImageData(imgData, x0, y0);
+        }
+        updateInfo = "全屏关键帧 (100% 画布重建)";
+      } else if (f.type === 'rect') {
+        // 脏矩形局部覆盖！
+        let totalDirtyArea = 0;
+        for (let r of f.rects) {
+          totalDirtyArea += r.w * r.h;
+          const rawRgb = decompressTile(r.data, r.w, r.h);
+          const imgData = ctx.createImageData(r.w, r.h);
+          for (let p = 0; p < r.w * r.h; p++) {
+            imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
+            imgData.data[p * 4 + 1] = rawRgb[p * 3 + 1];
+            imgData.data[p * 4 + 2] = rawRgb[p * 3 + 2];
+            imgData.data[p * 4 + 3] = 255;
+          }
+          // 仅更新变化的局部矩形
+          ctx.putImageData(imgData, r.x, r.y);
+        }
+        const pct = ((totalDirtyArea / (decoder.width * decoder.height)) * 100).toFixed(2);
+        updateInfo = `脏矩形局部刷新 (仅刷新 ${pct}% 面积，节省 ${(100 - pct).toFixed(2)}% 开销)`;
+      } else if (f.type === 'tile') {
+        // 瓦片局部刷新
+        for (let i = 0; i < f.indices.length; i++) {
+          const tidx = f.indices[i];
+          const row = Math.floor(tidx / decoder.cols);
+          const col = tidx % decoder.cols;
+          const x0 = col * decoder.tileSize;
+          const y0 = row * decoder.tileSize;
+          const w = Math.min(decoder.tileSize, decoder.width - x0);
+          const h = Math.min(decoder.tileSize, decoder.height - y0);
+
+          const rawRgb = decompressTile(f.payloads[i], w, h);
+          const imgData = ctx.createImageData(w, h);
+          for (let p = 0; p < w * h; p++) {
+            imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
+            imgData.data[p * 4 + 1] = rawRgb[p * 3 + 1];
+            imgData.data[p * 4 + 2] = rawRgb[p * 3 + 2];
+            imgData.data[p * 4 + 3] = 255;
+          }
+          ctx.putImageData(imgData, x0, y0);
+        }
+        updateInfo = `瓦片局部刷新 (仅更新 ${f.indices.length} / ${decoder.totalTiles} 个瓦片)`;
+      } else if (f.type === 'empty') {
+        updateInfo = "画面零变化 (纯时间戳空帧步进)";
+      }
+
+      statsBox.innerHTML = `当前帧: #${idx + 1} / ${decoder.frames.length} | 时间点: ${f.timeSec.toFixed(3)}s<br>` +
+        `刷新模式: <b>${updateInfo}</b>`;
+    }
+
+    function playLoop() {
+      if (!isPlaying || !decoder) return;
+      if (currentFrameIdx >= decoder.frames.length - 1) {
+        isPlaying = false;
+        btnPlay.disabled = false;
+        btnPause.disabled = true;
+        return;
+      }
+
+      const currF = decoder.frames[currentFrameIdx];
+      const nextF = decoder.frames[currentFrameIdx + 1];
+      const delayMs = Math.max(5, (nextF.timeSec - currF.timeSec) * 1000);
+
+      timerId = setTimeout(() => {
+        currentFrameIdx++;
+        renderFrame(currentFrameIdx);
+        playLoop();
+      }, delayMs);
+    }
+
+    btnPlay.addEventListener("click", () => {
+      if (!decoder) return;
+      isPlaying = true;
+      btnPlay.disabled = true;
+      btnPause.disabled = false;
+      playLoop();
+    });
+
+    btnPause.addEventListener("click", () => {
+      isPlaying = false;
+      clearTimeout(timerId);
+      btnPlay.disabled = false;
+      btnPause.disabled = true;
+    });
+
+    btnReset.addEventListener("click", () => {
+      isPlaying = false;
+      clearTimeout(timerId);
+      currentFrameIdx = 0;
+      renderFrame(0);
+      btnPlay.disabled = false;
+      btnPause.disabled = true;
+    });
+  </script>
+</body>
+</html>
