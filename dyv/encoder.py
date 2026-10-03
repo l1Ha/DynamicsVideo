@@ -40,7 +40,7 @@ from .format import (
     write_key_packet,
     write_tail,
 )
-from .rects import find_dirty_bbox
+from .rects import find_dirty_bbox, find_dirty_rects
 from .tiles import changed_tiles, grid_dims, tile_bounds, tile_count
 
 
@@ -212,14 +212,14 @@ class DyvWriter:
         self._canvas[:] = frame
 
     def _write_delta_frame(self, frame: np.ndarray, pts: int) -> None:
-        # 1. 检查画面是否完全无变化 -> 空帧（零画面数据，仅推进时间戳）
-        bbox = find_dirty_bbox(self._canvas, frame)
-        if bbox is None:
+        # 1. 提取多脏矩形 (若全无变动返回空列表)
+        rect_list = find_dirty_rects(self._canvas, frame, block_size=self.tile_size // 2 or 16)
+        if not rect_list:
+            # 画面完全无变化 -> 空帧（零画面数据，仅推进时间戳）
             write_empty_packet(self._file, pts)
             return
 
-        x, y, w, h = bbox
-        dirty_area = w * h
+        total_dirty_area = sum(w * h for x, y, w, h in rect_list)
         total_pixels = self.width * self.height
 
         # 2. 决定使用“矩形局部刷新”还是“瓦片网格局部刷新”
@@ -229,33 +229,36 @@ class DyvWriter:
         elif self.refresh_mode == "tile":
             use_rect = False
         else:  # auto
-            # 当变化集中在某区域且面积不超过画面的 85% 时，使用精确脏矩形；
-            # 否则比较瓦片数
-            if dirty_area <= total_pixels * 0.85:
+            # 当总变动面积不超过画面的 85% 时，使用精确脏矩形；
+            if total_dirty_area <= total_pixels * 0.85:
                 use_rect = True
             else:
                 use_rect = False
 
         if use_rect:
-            # === 矩形局部刷新：仅保存变化地方的画面数据 ===
-            patch_data = frame[y : y + h, x : x + w]
-            if (
-                self.transform == Transform.XOR_DELTA
-                and self.tile_codec not in (TileCodec.JPEG, TileCodec.WEBP)
-            ):
-                ref_patch = self._canvas[y : y + h, x : x + w]
-                diff_data = np.bitwise_xor(patch_data, ref_patch)
-                payload = compress_tile(
-                    self.tile_codec, diff_data, quality=self.quality
-                )
-            else:
-                payload = compress_tile(
-                    self.tile_codec, patch_data, quality=self.quality
-                )
+            # === 矩形局部刷新：支持单矩形或多矩形独立紧凑编码 ===
+            patches: List[RectPatch] = []
+            for rx, ry, rw, rh in rect_list:
+                patch_data = frame[ry : ry + rh, rx : rx + rw]
+                if (
+                    self.transform == Transform.XOR_DELTA
+                    and self.tile_codec not in (TileCodec.JPEG, TileCodec.WEBP)
+                ):
+                    ref_patch = self._canvas[ry : ry + rh, rx : rx + rw]
+                    diff_data = np.bitwise_xor(patch_data, ref_patch)
+                    payload = compress_tile(
+                        self.tile_codec, diff_data, quality=self.quality
+                    )
+                else:
+                    payload = compress_tile(
+                        self.tile_codec, patch_data, quality=self.quality
+                    )
+                patches.append(RectPatch(x=rx, y=ry, w=rw, h=rh, payload=payload))
 
-            rect_patch = RectPatch(x=x, y=y, w=w, h=h, payload=payload)
-            write_delta_rects_packet(self._file, pts, [rect_patch])
-            self._canvas[y : y + h, x : x + w] = patch_data
+            write_delta_rects_packet(self._file, pts, patches)
+            # 批量应用到参考画布
+            for rx, ry, rw, rh in rect_list:
+                self._canvas[ry : ry + rh, rx : rx + rw] = frame[ry : ry + rh, rx : rx + rw]
         else:
             # === 瓦片局部刷新：仅保存变化的瓦片 ===
             indices = changed_tiles(

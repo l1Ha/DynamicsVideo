@@ -1,8 +1,30 @@
 import numpy as np
 import pytest
 
-from dyv.rects import compute_change_ratio, find_dirty_bbox
+from dyv.rects import compute_change_ratio, find_dirty_bbox, find_dirty_rects
 from dyv.tiles import changed_tiles, grid_dims, tile_bounds, tile_count
+
+
+def test_multi_dirty_rects_clustering():
+    canvas = np.zeros((200, 200, 3), dtype=np.uint8)
+    frame = canvas.copy()
+
+    # 在左上角 (10, 10, 20, 20) 和 右下角 (160, 160, 20, 20) 各画一个色块
+    frame[10:30, 10:30] = 255
+    frame[160:180, 160:180] = 180
+
+    # 单外接框面积会是 ~170x170 = 28900
+    single = find_dirty_bbox(canvas, frame)
+    assert single is not None
+    assert single[2] * single[3] > 20000
+
+    # 多矩形聚类应该识别出两个独立紧凑的矩形
+    rects = find_dirty_rects(canvas, frame, block_size=16)
+    assert len(rects) == 2
+    # 两个小矩形面积和仅为 400 + 400 = 800，比单框节省 95% 以上的无用像素面积！
+    total_area = sum(r[2] * r[3] for r in rects)
+    assert total_area < 2000
+    assert total_area < (single[2] * single[3] * 0.1)
 
 
 def test_grid_dims_and_bounds():

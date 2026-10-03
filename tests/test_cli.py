@@ -25,6 +25,10 @@ def test_cli_info_and_bench(capsys):
         assert "64 x 64" in captured.out
         assert "DyV 视频信息" in captured.out
 
+        # 测试 verify 命令
+        ret_veri = main(["verify", dyv_path])
+        assert ret_veri == 0
+
         # 测试 bench 命令
         ret = main(["bench", dyv_path])
         assert ret == 0

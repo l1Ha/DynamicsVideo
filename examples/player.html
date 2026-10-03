@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>DyV Web Player (HTML5 Canvas 原生局部刷新播放器)</title>
+  <title>DyV Web Player Pro (HTML5 Canvas 局部刷新播放器)</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -11,24 +11,25 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 30px;
+      padding: 24px;
       margin: 0;
     }
     h1 {
-      margin-bottom: 6px;
+      margin: 0 0 6px 0;
       color: #38bdf8;
       font-size: 26px;
     }
     .subtitle {
       color: #94a3b8;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       font-size: 14px;
       text-align: center;
-      max-width: 650px;
+      max-width: 700px;
+      line-height: 1.5;
     }
     .player-card {
       background: #1e293b;
-      padding: 24px;
+      padding: 20px;
       border-radius: 14px;
       box-shadow: 0 12px 30px rgba(0,0,0,0.6);
       display: flex;
@@ -36,6 +37,12 @@
       align-items: center;
       max-width: 900px;
       width: 100%;
+      border: 2px dashed transparent;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .player-card.drag-over {
+      border-color: #38bdf8;
+      background: #1e3a5f;
     }
     .canvas-wrapper {
       position: relative;
@@ -48,79 +55,138 @@
       display: block;
       max-width: 100%;
     }
+    #overlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+    }
+    .progress-bar-container {
+      width: 100%;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .progress-bar-container input[type="range"] {
+      flex: 1;
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+    .time-label {
+      font-family: monospace;
+      font-size: 13px;
+      color: #cbd5e1;
+      min-width: 95px;
+      text-align: right;
+    }
     .controls {
       display: flex;
-      gap: 12px;
-      margin-top: 18px;
+      gap: 10px;
+      margin-top: 14px;
       align-items: center;
       width: 100%;
       justify-content: center;
       flex-wrap: wrap;
     }
-    button, label.btn-upload {
+    button, label.btn-upload, select {
       background: #0284c7;
       color: white;
       border: none;
-      padding: 10px 18px;
+      padding: 8px 16px;
       border-radius: 8px;
       cursor: pointer;
       font-weight: 600;
-      font-size: 14px;
-      transition: background 0.2s, transform 0.1s;
+      font-size: 13px;
+      transition: background 0.2s;
     }
-    button:hover:not(:disabled), label.btn-upload:hover {
+    button:hover:not(:disabled), label.btn-upload:hover, select:hover {
       background: #0369a1;
-      transform: translateY(-1px);
     }
     button:disabled {
       background: #475569;
       cursor: not-allowed;
       opacity: 0.6;
     }
+    select {
+      outline: none;
+      appearance: auto;
+    }
+    .opt-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #cbd5e1;
+      cursor: pointer;
+      margin-left: 8px;
+    }
+    .opt-toggle input {
+      accent-color: #4ade80;
+      cursor: pointer;
+    }
     input[type="file"] {
       display: none;
     }
     .stats {
-      margin-top: 20px;
+      margin-top: 16px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 13px;
+      font-size: 12px;
       color: #34d399;
       background: #090d16;
-      padding: 14px 20px;
+      padding: 12px 18px;
       border-radius: 8px;
-      width: 95%;
+      width: 100%;
       box-sizing: border-box;
-      line-height: 1.7;
+      line-height: 1.6;
       border: 1px solid #1e3a5f;
     }
   </style>
-  <!-- 引入 pako 库以支持浏览器端原生解压 zlib -->
   <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 </head>
 <body>
 
-  <h1>DyV HTML5 局部刷新播放器</h1>
+  <h1>DyV HTML5 局部刷新播放器 Pro</h1>
   <div class="subtitle">
-    原生利用 Canvas <code>putImageData</code> 进行亚毫秒级局部脏矩形覆盖。当画面中仅局部变动时，浏览器仅将变化区域写入画布，CPU 占用极低！
+    支持拖拽加载 .dyv 视频、动态帧率精准时间轴、进度条任意拖拽 Seek、多倍速播放及<b>脏矩形实时绿色高亮调试遮罩</b>。
   </div>
 
-  <div class="player-card">
+  <div class="player-card" id="dropZone">
     <div class="canvas-wrapper">
       <canvas id="videoCanvas" width="640" height="480"></canvas>
+      <canvas id="overlayCanvas" width="640" height="480"></canvas>
+    </div>
+
+    <div class="progress-bar-container">
+      <input type="range" id="seekBar" min="0" max="0" value="0" step="1" disabled>
+      <span class="time-label" id="timeLabel">0.00s / 0.00s</span>
     </div>
     
     <div class="controls">
       <label class="btn-upload">
-        选择 .dyv 视频
+        📁 选择/拖入 .dyv
         <input type="file" id="fileInput" accept=".dyv">
       </label>
-      <button id="btnPlay" disabled>播放</button>
-      <button id="btnPause" disabled>暂停</button>
-      <button id="btnReset" disabled>重新播放</button>
+      <button id="btnPlay" disabled>▶ 播放</button>
+      <button id="btnPause" disabled>⏸ 暂停</button>
+      <button id="btnReset" disabled>⏮ 重头播放</button>
+
+      <select id="speedSelect">
+        <option value="0.5">0.5x 倍速</option>
+        <option value="1.0" selected>1.0x 正常</option>
+        <option value="1.5">1.5x 倍速</option>
+        <option value="2.0">2.0x 倍速</option>
+        <option value="4.0">4.0x 倍速</option>
+      </select>
+
+      <label class="opt-toggle">
+        <input type="checkbox" id="chkOverlay" checked>
+        高亮显示变动脏矩形
+      </label>
     </div>
 
     <div class="stats" id="statsBox">
-      等待加载 .dyv 文件... 您可以从 examples/ 目录选择测试生成的视频。
+      等待加载 .dyv 视频... 可直接将 .dyv 文件拖拽至此卡片内。
     </div>
   </div>
 
@@ -131,6 +197,7 @@
         this.view = new DataView(arrayBuffer);
         this.offset = 0;
         this.frames = [];
+        this.keyIndices = [];
         this.parseHeader();
         this.parseAllFrames();
       }
@@ -165,7 +232,6 @@
         this.rows = Math.floor((this.height + this.tileSize - 1) / this.tileSize);
         this.totalTiles = this.cols * this.rows;
 
-        // 跳过 Header 元数据盒
         while (this.offset < this.bytes.length) {
           let boxType = this.bytes[this.offset++];
           if (boxType === 0) break;
@@ -175,29 +241,29 @@
       }
 
       parseAllFrames() {
+        let ordinal = 0;
         while (this.offset < this.bytes.length) {
           let ftype = this.bytes[this.offset++];
-          if (ftype === 0xFF) break; // 帧流终止
+          if (ftype === 0xFF) break;
 
           let pts = this.readVarint();
+          let timeSec = pts / this.timescale;
 
           if (ftype === 3) {
-            // EMPTY 空帧
-            this.frames.push({ type: 'empty', pts, timeSec: pts / this.timescale });
-            continue;
-          }
-
-          if (ftype === 0) {
-            // KEY 关键帧
+            // EMPTY
+            this.frames.push({ ordinal, type: 'empty', pts, timeSec });
+          } else if (ftype === 0) {
+            // KEY
+            this.keyIndices.push(ordinal);
             let payloads = [];
             for (let i = 0; i < this.totalTiles; i++) {
               let len = this.readVarint();
               payloads.push(this.bytes.subarray(this.offset, this.offset + len));
               this.offset += len;
             }
-            this.frames.push({ type: 'key', pts, timeSec: pts / this.timescale, payloads });
+            this.frames.push({ ordinal, type: 'key', pts, timeSec, payloads });
           } else if (ftype === 1) {
-            // DELTA_TILES 瓦片局部刷新
+            // DELTA_TILES
             let count = this.readVarint();
             let indices = [];
             let prev = null;
@@ -213,9 +279,9 @@
               payloads.push(this.bytes.subarray(this.offset, this.offset + len));
               this.offset += len;
             }
-            this.frames.push({ type: 'tile', pts, timeSec: pts / this.timescale, indices, payloads });
+            this.frames.push({ ordinal, type: 'tile', pts, timeSec, indices, payloads });
           } else if (ftype === 2) {
-            // DELTA_RECTS 脏矩形局部刷新
+            // DELTA_RECTS
             let count = this.readVarint();
             let rects = [];
             for (let i = 0; i < count; i++) {
@@ -228,35 +294,52 @@
               this.offset += rlen;
               rects.push({ x: rx, y: ry, w: rw, h: rh, data: rdata });
             }
-            this.frames.push({ type: 'rect', pts, timeSec: pts / this.timescale, rects });
+            this.frames.push({ ordinal, type: 'rect', pts, timeSec, rects });
           }
+          ordinal++;
         }
       }
     }
 
-    // 播放器状态机
     const canvas = document.getElementById("videoCanvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    const overlayCanvas = document.getElementById("overlayCanvas");
+    const octx = overlayCanvas.getContext("2d");
+
+    const dropZone = document.getElementById("dropZone");
     const statsBox = document.getElementById("statsBox");
     const fileInput = document.getElementById("fileInput");
     const btnPlay = document.getElementById("btnPlay");
     const btnPause = document.getElementById("btnPause");
     const btnReset = document.getElementById("btnReset");
+    const seekBar = document.getElementById("seekBar");
+    const timeLabel = document.getElementById("timeLabel");
+    const speedSelect = document.getElementById("speedSelect");
+    const chkOverlay = document.getElementById("chkOverlay");
 
     let decoder = null;
     let currentFrameIdx = 0;
     let isPlaying = false;
     let timerId = null;
+    let playbackSpeed = 1.0;
 
-    fileInput.addEventListener("change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+    function decompressTile(data) {
+      if (typeof pako === 'undefined') throw new Error("需要 pako 库进行解压");
+      return pako.inflate(data);
+    }
 
+    function loadFileBuffer(buf, filename) {
       try {
-        const buf = await file.arrayBuffer();
         decoder = new DyvWebDecoder(buf);
         canvas.width = decoder.width;
         canvas.height = decoder.height;
+        overlayCanvas.width = decoder.width;
+        overlayCanvas.height = decoder.height;
+
+        seekBar.disabled = false;
+        seekBar.min = 0;
+        seekBar.max = decoder.frames.length - 1;
+        seekBar.value = 0;
 
         btnPlay.disabled = false;
         btnReset.disabled = false;
@@ -265,28 +348,48 @@
         currentFrameIdx = 0;
         renderFrame(0);
 
-        statsBox.innerHTML = `✅ 已加载文件: <b>${file.name}</b><br>` +
-          `尺寸: ${decoder.width} x ${decoder.height} | 总帧数: ${decoder.frames.length} | 时间基: ${decoder.timescale} ticks/s<br>` +
-          `总时长: ${decoder.frames[decoder.frames.length - 1].timeSec.toFixed(2)} 秒 (动态帧率 VFR)`;
+        const totalSec = decoder.frames[decoder.frames.length - 1].timeSec;
+        timeLabel.innerText = `0.00s / ${totalSec.toFixed(2)}s`;
+        statsBox.innerHTML = `✅ 已加载文件: <b>${filename}</b><br>` +
+          `分辨率: ${decoder.width} x ${decoder.height} | 总帧数: ${decoder.frames.length} | 关键帧数: ${decoder.keyIndices.length}<br>` +
+          `总时长: ${totalSec.toFixed(2)}s (动态帧率 VFR) | 瓦片大小: ${decoder.tileSize}px`;
       } catch (err) {
         alert("解析 DyV 失败: " + err.message);
       }
-    });
-
-    function decompressTile(data, w, h) {
-      if (typeof pako === 'undefined') {
-        throw new Error("请确保联网以加载 pako zlib 解压库");
-      }
-      return pako.inflate(data);
     }
 
-    function renderFrame(idx) {
-      if (!decoder || idx >= decoder.frames.length) return;
-      const f = decoder.frames[idx];
-      let updateInfo = "";
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const buf = await file.arrayBuffer();
+      loadFileBuffer(buf, file.name);
+    });
+
+    // 拖拽上传支持
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drag-over"));
+    dropZone.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("drag-over");
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        const buf = await file.arrayBuffer();
+        loadFileBuffer(buf, file.name);
+      }
+    });
+
+    speedSelect.addEventListener("change", (e) => {
+      playbackSpeed = parseFloat(e.target.value);
+    });
+
+    function applyFrameToCanvas(f, drawDebug = true) {
+      octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      const showDebug = chkOverlay.checked && drawDebug;
 
       if (f.type === 'key') {
-        // 全量关键帧渲染
         for (let i = 0; i < decoder.totalTiles; i++) {
           const row = Math.floor(i / decoder.cols);
           const col = i % decoder.cols;
@@ -295,7 +398,7 @@
           const w = Math.min(decoder.tileSize, decoder.width - x0);
           const h = Math.min(decoder.tileSize, decoder.height - y0);
 
-          const rawRgb = decompressTile(f.payloads[i], w, h);
+          const rawRgb = decompressTile(f.payloads[i]);
           const imgData = ctx.createImageData(w, h);
           for (let p = 0; p < w * h; p++) {
             imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
@@ -305,13 +408,14 @@
           }
           ctx.putImageData(imgData, x0, y0);
         }
-        updateInfo = "全屏关键帧 (100% 画布重建)";
+        if (showDebug) {
+          octx.strokeStyle = "rgba(56, 189, 248, 0.7)";
+          octx.lineWidth = 3;
+          octx.strokeRect(0, 0, decoder.width, decoder.height);
+        }
       } else if (f.type === 'rect') {
-        // 脏矩形局部覆盖！
-        let totalDirtyArea = 0;
         for (let r of f.rects) {
-          totalDirtyArea += r.w * r.h;
-          const rawRgb = decompressTile(r.data, r.w, r.h);
+          const rawRgb = decompressTile(r.data);
           const imgData = ctx.createImageData(r.w, r.h);
           for (let p = 0; p < r.w * r.h; p++) {
             imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
@@ -319,13 +423,17 @@
             imgData.data[p * 4 + 2] = rawRgb[p * 3 + 2];
             imgData.data[p * 4 + 3] = 255;
           }
-          // 仅更新变化的局部矩形
           ctx.putImageData(imgData, r.x, r.y);
+
+          if (showDebug) {
+            octx.strokeStyle = "#4ade80";
+            octx.lineWidth = 2;
+            octx.strokeRect(r.x, r.y, r.w, r.h);
+            octx.fillStyle = "rgba(74, 222, 128, 0.25)";
+            octx.fillRect(r.x, r.y, r.w, r.h);
+          }
         }
-        const pct = ((totalDirtyArea / (decoder.width * decoder.height)) * 100).toFixed(2);
-        updateInfo = `脏矩形局部刷新 (仅刷新 ${pct}% 面积，节省 ${(100 - pct).toFixed(2)}% 开销)`;
       } else if (f.type === 'tile') {
-        // 瓦片局部刷新
         for (let i = 0; i < f.indices.length; i++) {
           const tidx = f.indices[i];
           const row = Math.floor(tidx / decoder.cols);
@@ -335,7 +443,7 @@
           const w = Math.min(decoder.tileSize, decoder.width - x0);
           const h = Math.min(decoder.tileSize, decoder.height - y0);
 
-          const rawRgb = decompressTile(f.payloads[i], w, h);
+          const rawRgb = decompressTile(f.payloads[i]);
           const imgData = ctx.createImageData(w, h);
           for (let p = 0; p < w * h; p++) {
             imgData.data[p * 4 + 0] = rawRgb[p * 3 + 0];
@@ -344,15 +452,54 @@
             imgData.data[p * 4 + 3] = 255;
           }
           ctx.putImageData(imgData, x0, y0);
-        }
-        updateInfo = `瓦片局部刷新 (仅更新 ${f.indices.length} / ${decoder.totalTiles} 个瓦片)`;
-      } else if (f.type === 'empty') {
-        updateInfo = "画面零变化 (纯时间戳空帧步进)";
-      }
 
-      statsBox.innerHTML = `当前帧: #${idx + 1} / ${decoder.frames.length} | 时间点: ${f.timeSec.toFixed(3)}s<br>` +
-        `刷新模式: <b>${updateInfo}</b>`;
+          if (showDebug) {
+            octx.strokeStyle = "#fbbf24";
+            octx.lineWidth = 1;
+            octx.strokeRect(x0, y0, w, h);
+          }
+        }
+      }
     }
+
+    function renderFrame(idx) {
+      if (!decoder || idx >= decoder.frames.length) return;
+      const f = decoder.frames[idx];
+      applyFrameToCanvas(f, true);
+
+      seekBar.value = idx;
+      const totalSec = decoder.frames[decoder.frames.length - 1].timeSec;
+      timeLabel.innerText = `${f.timeSec.toFixed(2)}s / ${totalSec.toFixed(2)}s`;
+
+      let infoText = "";
+      if (f.type === 'key') infoText = "全屏关键帧 (Keyframe)";
+      else if (f.type === 'rect') infoText = `脏矩形局部刷新 (${f.rects.length} 块区域覆盖)`;
+      else if (f.type === 'tile') infoText = `瓦片网格局部刷新 (${f.indices.length} 块瓦片)`;
+      else if (f.type === 'empty') infoText = `静止空帧 (0 图像数据消耗)`;
+
+      statsBox.innerHTML = `当前帧: <b>#${idx + 1} / ${decoder.frames.length}</b> (PTS: ${f.pts}, ${f.timeSec.toFixed(3)}s) | 倍速: ${playbackSpeed}x<br>` +
+        `刷新模式: <b>${infoText}</b>`;
+    }
+
+    // 快速定位 (Seek 到目标帧)：定位到最近关键帧向后应用差量
+    function seekToFrame(targetIdx) {
+      if (!decoder) return;
+      let lastKey = 0;
+      for (let k of decoder.keyIndices) {
+        if (k <= targetIdx) lastKey = k;
+        else break;
+      }
+      for (let i = lastKey; i < targetIdx; i++) {
+        applyFrameToCanvas(decoder.frames[i], false);
+      }
+      currentFrameIdx = targetIdx;
+      renderFrame(targetIdx);
+    }
+
+    seekBar.addEventListener("input", (e) => {
+      const idx = parseInt(e.target.value, 10);
+      seekToFrame(idx);
+    });
 
     function playLoop() {
       if (!isPlaying || !decoder) return;
@@ -365,7 +512,7 @@
 
       const currF = decoder.frames[currentFrameIdx];
       const nextF = decoder.frames[currentFrameIdx + 1];
-      const delayMs = Math.max(5, (nextF.timeSec - currF.timeSec) * 1000);
+      const delayMs = Math.max(2, ((nextF.timeSec - currF.timeSec) * 1000) / playbackSpeed);
 
       timerId = setTimeout(() => {
         currentFrameIdx++;
@@ -392,8 +539,7 @@
     btnReset.addEventListener("click", () => {
       isPlaying = false;
       clearTimeout(timerId);
-      currentFrameIdx = 0;
-      renderFrame(0);
+      seekToFrame(0);
       btnPlay.disabled = false;
       btnPause.disabled = true;
     });

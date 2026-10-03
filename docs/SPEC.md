@@ -57,12 +57,12 @@
 | 0x00 | `magic` | 4 字节 | 固定为 ASCII 字符串 `"DYV "` (0x44, 0x59, 0x56, 0x20) |
 | 0x04 | `version` | u8 | 规范版本号，当前为 `1` |
 | 0x05 | `profile` | u8 | `0` = 无损 (Lossless), `1` = 有损 (Lossy) |
-| 0x06 | `flags` | u16 | 位标志：Bit 0 (`1<<0`) = 包含尾部索引；Bit 1 = 循环播放 |
+| 0x06 | `flags` | u16 | 位标志：Bit 0 (`1<<0`) = 包含尾部索引；Bit 1 = 循环播放；Bit 2 = 包含 CRC32 校验；Bit 3 = 包含音频轨 |
 | 0x08 | `width` | u32 | 画面宽度（像素） |
 | 0x0C | `height` | u32 | 画面高度（像素） |
 | 0x10 | `tile_size` | u16 | 瓦片尺寸（如 32, 64），边缘自动截断 |
 | 0x12 | `timescale` | u32 | 时间基（每秒 ticks 数，如 1000） |
-| 0x16 | `pixel_format` | u8 | `0` = RGB24 (3通道), `1` = RGBA32 (4通道) |
+| 0x16 | `pixel_format` | u8 | `0` = RGB24 (3通道), `1` = RGBA32 (4通道), `2` = GRAY8 (单通道灰度), `3` = GRAY8A (灰度+透明) |
 | 0x17 | `tile_codec` | u8 | 瓦片压缩算法（0=RAW, 1=ZLIB, 2=ZSTD, 3=JPEG, 4=WEBP） |
 | 0x18 | `transform` | u8 | 预处理变换（0=无变换, 1=XOR Delta 残差变换） |
 | 0x19 | `reserved` | u8 | 保留字节，写入 0 |

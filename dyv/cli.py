@@ -71,6 +71,53 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """对 DyV 视频进行逐帧完整性与健康度校验。"""
+    path = args.file
+    if not os.path.exists(path):
+        print(f"错误: 文件不存在 {path}", file=sys.stderr)
+        return 1
+
+    print(f"正在校验 {path} 的数据完整性...")
+    try:
+        with DyvReader(path) as r:
+            last_pts = -1
+            count = 0
+            keys = 0
+            rects = 0
+            tiles = 0
+            empties = 0
+
+            for f in r.iter_frames():
+                count += 1
+                if count == 1 and not f.is_key:
+                    print(f"❌ 错误: 首帧不是关键帧 (序号 #{f.ordinal})", file=sys.stderr)
+                    return 1
+                if f.pts < last_pts:
+                    print(f"❌ 错误: PTS 时间戳非单调递增 (帧 #{f.ordinal} PTS {f.pts} < 前一帧 {last_pts})", file=sys.stderr)
+                    return 1
+                last_pts = f.pts
+
+                if f.is_key:
+                    keys += 1
+                elif f.frame_type == 3:
+                    empties += 1
+                elif f.frame_type == 2:
+                    rects += 1
+                elif f.frame_type == 1:
+                    tiles += 1
+
+            if r.tail and r.tail.total_frames > 0 and r.tail.total_frames != count:
+                print(f"⚠️ 警告: 尾部声明总帧数 ({r.tail.total_frames}) 与实际解码帧数 ({count}) 不一致", file=sys.stderr)
+
+            print("✅ 校验通过！文件结构完好，视频流 100% 可正常解码。")
+            print(f"统计: 共 {count} 帧 (关键帧: {keys}, 脏矩形帧: {rects}, 瓦片帧: {tiles}, 空帧: {empties})")
+            return 0
+    except Exception as e:
+        print(f"❌ 文件损坏或异常: {e}", file=sys.stderr)
+        return 1
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
     path = args.file
     if not os.path.exists(path):
@@ -236,6 +283,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="关键帧间隔 (默认 60 帧)",
     )
 
+    # verify
+    p_veri = subparsers.add_parser("verify", help="逐帧校验 DyV 文件结构完整性与健康度")
+    p_veri.add_argument("file", help="DyV 视频文件路径")
+
     # convert
     p_conv = subparsers.add_parser("convert", help="将 GIF 与 DyV 进行相互转换")
     p_conv.add_argument("input", help="输入文件路径 (.gif 或 .dyv)")
@@ -246,6 +297,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_info(args)
     elif args.command == "bench":
         return cmd_bench(args)
+    elif args.command == "verify":
+        return cmd_verify(args)
     elif args.command == "dump":
         return cmd_dump(args)
     elif args.command == "encode":

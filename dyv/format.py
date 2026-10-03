@@ -46,11 +46,28 @@ class DyvFormatError(DyvError):
 class PixelFormat:
     RGB24 = 0
     RGBA32 = 1
+    GRAY8 = 2
+    GRAY8A = 3
 
 
-PIXEL_FORMAT_NAMES = {"rgb24": PixelFormat.RGB24, "rgba32": PixelFormat.RGBA32}
-PIXEL_CHANNELS = {PixelFormat.RGB24: 3, PixelFormat.RGBA32: 4}
-PIXEL_FORMAT_LABELS = {PixelFormat.RGB24: "rgb24", PixelFormat.RGBA32: "rgba32"}
+PIXEL_FORMAT_NAMES = {
+    "rgb24": PixelFormat.RGB24,
+    "rgba32": PixelFormat.RGBA32,
+    "gray8": PixelFormat.GRAY8,
+    "gray8a": PixelFormat.GRAY8A,
+}
+PIXEL_CHANNELS = {
+    PixelFormat.RGB24: 3,
+    PixelFormat.RGBA32: 4,
+    PixelFormat.GRAY8: 1,
+    PixelFormat.GRAY8A: 2,
+}
+PIXEL_FORMAT_LABELS = {
+    PixelFormat.RGB24: "rgb24",
+    PixelFormat.RGBA32: "rgba32",
+    PixelFormat.GRAY8: "gray8",
+    PixelFormat.GRAY8A: "gray8a",
+}
 
 
 class TileCodec:
@@ -92,6 +109,8 @@ FRAME_END = 0xFF  # 帧流结束哨兵
 
 FLAG_HAS_INDEX = 1 << 0
 FLAG_LOOP = 1 << 1
+FLAG_HAS_CRC32 = 1 << 2  # 帧尾/流校验扩展标志
+FLAG_HAS_AUDIO = 1 << 3  # 音频轨道扩展标志
 
 PROFILE_LOSSLESS = 0
 PROFILE_LOSSY = 1
@@ -111,6 +130,8 @@ BOX_ENCODER = 5        # utf-8 编码器描述
 BOX_KV = 6             # varint 键长 + utf-8 键 + 值
 BOX_DEFAULT_TICKS = 7  # varint 默认帧间隔（ticks），供 CFR 播放器回退
 BOX_TOTAL_TICKS = 8    # varint 总时长（ticks）
+BOX_AUDIO_HEADER = 20  # 音频头扩展（采样率、通道数、编码类型：Opus/AAC/FLAC/PCM）
+BOX_AUDIO_CHUNK = 21   # 音频交织流数据包 (PTS + 音频载荷)
 
 
 @dataclass
